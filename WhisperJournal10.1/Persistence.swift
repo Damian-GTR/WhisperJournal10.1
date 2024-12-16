@@ -6,51 +6,71 @@
 //
 
 import CoreData
+import SwiftUI
 
 struct PersistenceController {
     static let shared = PersistenceController()
 
-    static var preview: PersistenceController = {
-        let result = PersistenceController(inMemory: true)
-        let viewContext = result.container.viewContext
-        for _ in 0..<10 {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-        }
-        do {
-            try viewContext.save()
-        } catch {
-            // Replace this implementation with code to handle the error appropriately.
-            // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-            let nsError = error as NSError
-            fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-        }
-        return result
-    }()
-
+    // Contenedor de Core Data
     let container: NSPersistentContainer
 
     init(inMemory: Bool = false) {
         container = NSPersistentContainer(name: "WhisperJournal10_1")
+        
         if inMemory {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
         }
-        container.loadPersistentStores(completionHandler: { (storeDescription, error) in
+        
+        container.loadPersistentStores { (storeDescription, error) in
             if let error = error as NSError? {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-
-                /*
-                 Typical reasons for an error here include:
-                 * The parent directory does not exist, cannot be created, or disallows writing.
-                 * The persistent store is not accessible, due to permissions or data protection when the device is locked.
-                 * The device is out of space.
-                 * The store could not be migrated to the current model version.
-                 Check the error message to determine what the actual problem was.
-                 */
                 fatalError("Unresolved error \(error), \(error.userInfo)")
             }
-        })
+        }
+        
+        // Configurar combinación automática de cambios
         container.viewContext.automaticallyMergesChangesFromParent = true
+    }
+
+    // Guardar los cambios en Core Data
+    func saveContext() {
+        let context = container.viewContext
+        if context.hasChanges {
+            do {
+                try context.save()
+            } catch {
+                let nsError = error as NSError
+                fatalError("No se pudo guardar el contexto: \(nsError), \(nsError.userInfo)")
+            }
+        }
+    }
+
+    // Método para guardar una transcripción
+    func saveTranscript(text: String, date: Date? = nil, tags: String? = nil) {
+        let context = container.viewContext
+        let newTranscript = Transcript(context: context)
+        newTranscript.text = text
+        newTranscript.date = date ?? Date()
+        newTranscript.tags = tags ?? ""
+        newTranscript.timestamp = Date()
+        
+        do {
+            try context.save()
+        } catch {
+            print("Error guardando transcripción: \(error)")
+        }
+    }
+
+    // Obtener todas las transcripciones guardadas
+    func fetchAllTranscripts() -> [Transcript] {
+        let context = container.viewContext
+        let fetchRequest: NSFetchRequest<Transcript> = Transcript.fetchRequest()
+        
+        do {
+            let transcripts = try context.fetch(fetchRequest)
+            return transcripts
+        } catch {
+            print("Error al obtener las transcripciones: \(error)")
+            return []
+        }
     }
 }

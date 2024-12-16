@@ -4,85 +4,182 @@
 //
 //  Created by andree on 14/12/24.
 //
-
 import SwiftUI
+import AVFoundation
 import CoreData
+import AudioKit
+import AudioKitUI
 
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @State private var isRecording = false
+    @State private var recordedText = ""
+    @State private var transcriptionDate = Date()
+    @State private var tags = ""
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+    let audioRecorder = AudioRecorder()
+    let engine = AudioEngine()
+        let mic: AudioEngine.InputNode
 
+        init() {
+            // Configurar el nodo del micrófono
+            guard let input = engine.input else {
+                fatalError("No se pudo acceder al micrófono.")
+            }
+            mic = input
+        }
     var body: some View {
         NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+            VStack {
+                Text("Whisper Journal")
+                    .font(.largeTitle)
+                    .padding()
+
+                // Visualizador de ondas de audio
+                if isRecording {
+                    NodeOutputView(mic)
+                        .frame(height: 150)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(10)
+                        .padding()
+                }
+
+                // Botón para grabar
+                Button(action: {
+                    if isRecording {
+                        stopRecording()
+                    } else {
+                        startRecording()
                     }
+                }) {
+                    Text(isRecording ? "Stop Recording" : "Start Recording")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isRecording ? Color.red : Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .font(.headline)
                 }
-                .onDelete(perform: deleteItems)
+                .padding(.top, 20)
+
+                // Mostrar la transcripción
+                if !recordedText.isEmpty {
+                    Text("Transcription:")
+                        .font(.headline)
+                        .padding(.top, 20)
+
+                    Text(recordedText)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                }
+
+                // Campo de entrada para Tags
+                TextField("Enter tags...", text: $tags)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .padding()
+
+                // Botón para guardar la transcripción
+                Button(action: saveTranscription) {
+                    Text("Save Transcription")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .font(.headline)
+                }
+                .padding(.top, 10)
+
+                // Botón para ver transcripciones guardadas
+                NavigationLink(destination: TranscriptionListView()) {
+                    Text("View Saved Transcriptions")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.purple)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .font(.headline)
+                }
+                .padding(.top, 10)
+
+                Spacer()
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+            .padding()
+            .navigationTitle("Home")
+            .onAppear {
+                mic.start() // Iniciar el micrófono para el visualizador
             }
-            Text("Select an item")
+            .onDisappear {
+                mic.stop() // Detener el micrófono al salir de la vista
+            }
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
+    // Iniciar grabación
+    func startRecording() {
+        isRecording = true
+        recordedText = ""
+        transcriptionDate = Date()
+        audioRecorder.startRecording { transcription in
+            self.recordedText = transcription
+        }
+    }
 
+    // Detener grabación
+    func stopRecording() {
+        isRecording = false
+        audioRecorder.stopRecording()
+    }
+
+    // Guardar transcripción en Core Data
+    func saveTranscription() {
+        guard !recordedText.isEmpty else {
+            print("No transcription to save.")
+            return
+        }
+
+        let newTranscript = Transcript(context: viewContext)
+        newTranscript.text = recordedText
+        newTranscript.date = transcriptionDate
+        newTranscript.tags = tags
+
+        do {
+            try viewContext.save()
+            print("Transcription saved successfully!")
+            resetFields()
+        } catch {
+            print("Error saving transcription: \(error.localizedDescription)")
+        }
+    }
+
+    // Reiniciar campos después de guardar
+    func resetFields() {
+        recordedText = ""
+        tags = ""
+    }
+    
+    // Iniciar el motor de audio
+        func startAudioEngine() {
             do {
-                try viewContext.save()
+                try engine.start()
             } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+                print("Error al iniciar el motor de audio: \(error.localizedDescription)")
             }
+        }
+
+        // Detener el motor de audio
+        func stopAudioEngine() {
+            engine.stop()
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
-    }
-}
-
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+        let context = PersistenceController.shared.container.viewContext
+        ContentView()
+            .environment(\.managedObjectContext, context)
     }
 }
